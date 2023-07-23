@@ -1,21 +1,35 @@
 use std::array::from_fn;
 use std::mem::swap;
 use std::ops::{BitAnd, BitOr, BitXor, Not, Shl, Shr};
-
 mod prng;
 use prng::Prng;
 
+// gather: p0 + p015 + 4*p23 + p5 (lat 20)
+// load aligned: 1*p015+1*p23 (lat ptr: 5, index: 8)
+use int_lib::Cint;
 mod int_lib {
     use std::arch::x86_64::*;
+    use std::fmt::Debug;
     use std::ops::{BitAnd, BitOr, BitXor, Not, Shl, Shr};
 
-    #[derive(Copy, Clone)]
+    #[derive(Copy, Clone, Debug)]
     struct M256w(__m256i);
+    impl Eq for M256w {
+        fn assert_receiver_is_total_eq(&self) {
+            todo!()
+        }
+    }
+    impl PartialEq for M256w {
+        fn eq(&self, other: &Self) -> bool {
+            todo!()
+        }
+    }
 
     impl BitOr for M256w {
         type Output = Self;
 
         /// 1 lat, 1/3 cycle
+        /// p015
         #[inline(always)]
         fn bitor(self, rhs: Self) -> Self::Output {
             Self(unsafe { _mm256_or_si256(self.0, rhs.0) })
@@ -25,6 +39,7 @@ mod int_lib {
         type Output = Self;
 
         /// 1 lat, 1/3 cycle
+        /// p015
         #[inline(always)]
         fn bitxor(self, rhs: Self) -> Self::Output {
             Self(unsafe { _mm256_xor_si256(self.0, rhs.0) })
@@ -34,6 +49,7 @@ mod int_lib {
         type Output = Self;
 
         /// 1 lat, 1/3 cycle
+        /// p015
         #[inline(always)]
         fn bitand(self, rhs: Self) -> Self::Output {
             Self(unsafe { _mm256_and_si256(self.0, rhs.0) })
@@ -43,6 +59,7 @@ mod int_lib {
         type Output = Self;
 
         /// 1 lat, 1/3 cycle
+        /// p015 or p015 + p23
         #[inline(always)]
         fn not(self) -> Self::Output {
             Self(unsafe { _mm256_xor_si256(self.0, _mm256_set1_epi32(-1)) })
@@ -50,68 +67,119 @@ mod int_lib {
     }
     impl Cint for M256w {
         /// 1 lat, 1 cycle
+        /// p5
         #[inline(always)]
         fn sll1(self) -> Self {
             Self(unsafe { _mm256_slli_si256::<1>(self.0) })
         }
 
         /// 1 lat, 1 cycle
+        /// p5
         #[inline(always)]
         fn srl1(self) -> Self {
             Self(unsafe { _mm256_srli_si256::<1>(self.0) })
         }
 
         /// 1 lat, 1/3 cycle
+        /// p015
         #[inline(always)]
         fn andn(self, other: Self) -> Self {
             Self(unsafe { _mm256_andnot_si256(other.0, self.0) })
         }
     }
 
-    trait Cint:
+    pub trait Cint:
         BitXor<Output = Self>
         + BitAnd<Output = Self>
         + Not<Output = Self>
         + BitOr<Output = Self>
         + Copy
         + Clone
+        + Debug
+        + PartialEq
+        + Eq
     {
         const BITS: usize = std::mem::size_of::<Self>();
         /// 1 lat, 1/3 cycle
         #[inline(always)]
         fn andn(self, other: Self) -> Self {
-            self & (!other) 
+            self & (!other)
         }
-        /// 1 lat, 1 cycle
         fn sll1(self) -> Self;
         fn srl1(self) -> Self;
+
+        // lat: 3 cycles
         #[inline(always)]
         fn full_add(a: Self, b: Self, c: Self) -> (Self, Self) {
             let a_xor_b = a ^ b;
-            (a_xor_b ^ c, a_xor_b & c | a & b)
+            let t0 = a & b;
+            // [dependency barrier]
+            let t1 = a_xor_b ^ c;
+            let t2 = a_xor_b & c;
+            // [dependency barrier]
+            (t1, t2 | t0)
         }
         #[inline(always)]
         fn half_add(a: Self, b: Self) -> (Self, Self) {
             (a ^ b, a & b)
         }
         #[inline(always)]
-        fn full_add_inner(self) -> (Self, Self) {
-            Self::full_add(self.sll1(), self, self.srl1())
+        fn full_add_inner(s: Self) -> (Self, Self) {
+            Self::full_add(s.sll1(), s, s.srl1())
         }
-        #[inline(always)]
-        fn next_state(self, p1: (Self, Self), p2: (Self, Self), p3: (Self, Self)) -> Self {
-            // TODO: share full sum calc between row pairs (saves 1 operation/row on average)
-            let (a, b) = Self::full_add(p1.0, p2.0, p3.0);
-            let (c, d) = Self::full_add(p1.1, p2.1, p3.1);
+        fn next_state(n1: Self, n2: Self, n3: Self) -> Self {
+            Self::next_state_from_partials(
+                n2,
+                Self::full_add_inner(n1),
+                Self::full_add_inner(n2),
+                Self::full_add_inner(n3),
+            )
+        }
+        #[inline(never)]
+        fn next_state_from_partials(
+            s: Self,
+            p1: (Self, Self),
+            p2: (Self, Self),
+            p3: (Self, Self),
+        ) -> Self {
+            let (a, b) = Self::full_add(p1.0, p2.0, p3.0); // 1, 2
+            let (c, d) = Self::full_add(p1.1, p2.1, p3.1); // 2, 4
+
+            //let eq4 = !a & (!b & !c & d | b & c & !d);
+            let eq4 = !a & !(b ^ c) & ((b & c) ^ d);
             
-            // parallelization barrier
-            let t0 = b ^ c;
-            let t1 = b & c;
-            let t2 = self & a;
 
-            // parallelization barrier
+            let eq3 = a & !d & (b ^ c);
+            eq3 | (eq4 & s)
 
-            todo!()
+            //todo!()
+
+            //let (pa, pb) = Self::full_add(p1.0, p2.0, p3.0); // 1, 2
+            //let (pc, pd) = Self::full_add(p1.1, p2.1, p3.1); // 2, 4
+
+            //let a = pa; // 1
+            //let (b, t0) = Self::half_add(pb, pc); // 2, 4
+            //let (c, d) = Self::half_add(t0, pd); // 4, 8
+            //
+            //((!a) & (!b) & c & (!d)) | (a & b & (!c) & (!d) & s)
+
+            //// TODO: share full sum calc between row pairs (saves 1 operation/row on average)
+            //let (a, b) = Self::full_add(p1.0, p2.0, p3.0);
+            //let (c, d) = Self::full_add(p1.1, p2.1, p3.1);
+            //// [dependency barrier]
+            //let t0 = b ^ c;
+            //let t1 = b & c;
+            //let t2 = s & a;
+            //// [dependency barrier]
+            //let t3 = d ^ t1;
+            //let t4 = t2.andn(d);
+            //// [dependency barrier]
+            //{
+            //    let t5 = t3.andn(t0);
+            //    let t6 = t0 & t4;
+            //    // [dependency barrier]
+            //    t5 | t6
+            //}
         }
     }
     impl<T> Cint for T
@@ -124,7 +192,10 @@ mod int_lib {
             + Shl<Output = T>
             + From<u8>
             + Copy
-            + Clone,
+            + Clone
+            + Debug
+            + PartialEq
+            + Eq,
     {
         fn sll1(self) -> Self {
             self << T::from(1)
@@ -410,6 +481,7 @@ mod test {
             let baseline = nxt_state_line_baseline(n1, n2, n3);
             assert_eq!(baseline, nxt_state_line_optim(n1, n2, n3));
             assert_eq!(baseline, nxt_state_line_nested(n1, n2, n3));
+            assert_eq!(baseline, Cint::next_state(n1, n2, n3));
         }
     }
     fn nxt_state_line_baseline(n1: u64, n2: u64, n3: u64) -> u64 {
