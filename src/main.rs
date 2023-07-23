@@ -88,6 +88,38 @@ mod int_lib {
         }
     }
 
+    // lat: 3 cycles
+    #[inline(always)]
+    fn full_add<T: Cint>(a: T, b: T, c: T) -> (T, T) {
+        let a_xor_b = a ^ b;
+        let t0 = a & b;
+        // [dependency barrier]
+        let t1 = a_xor_b ^ c;
+        let t2 = a_xor_b & c;
+        // [dependency barrier]
+        (t1, t2 | t0)
+    }
+    #[inline(always)]
+    fn full_add_inner<T: Cint>(s: T) -> (T, T) {
+        full_add(s.sll1(), s, s.srl1())
+    }
+
+    #[inline(never)]
+    fn next_state_from_partials<T: Cint>(s: T, p1: (T, T), p2: (T, T), p3: (T, T)) -> T {
+        //// TODO: share full sum calc between row pairs (saves 1 operation/row on average)
+        let (a, b) = full_add(p1.0, p2.0, p3.0); // 1, 2
+        let (c, d) = full_add(p1.1, p2.1, p3.1); // 2, 4
+        let bxc = b ^ c;
+        a & bxc & !d | !a & !bxc & ((b & c) ^ d) & s
+    }
+    pub fn next_state<T: Cint>(n1: T, n2: T, n3: T) -> T {
+        next_state_from_partials(
+            n2,
+            full_add_inner(n1),
+            full_add_inner(n2),
+            full_add_inner(n3),
+        )
+    }
     pub trait Cint:
         BitXor<Output = Self>
         + BitAnd<Output = Self>
@@ -107,80 +139,6 @@ mod int_lib {
         }
         fn sll1(self) -> Self;
         fn srl1(self) -> Self;
-
-        // lat: 3 cycles
-        #[inline(always)]
-        fn full_add(a: Self, b: Self, c: Self) -> (Self, Self) {
-            let a_xor_b = a ^ b;
-            let t0 = a & b;
-            // [dependency barrier]
-            let t1 = a_xor_b ^ c;
-            let t2 = a_xor_b & c;
-            // [dependency barrier]
-            (t1, t2 | t0)
-        }
-        #[inline(always)]
-        fn half_add(a: Self, b: Self) -> (Self, Self) {
-            (a ^ b, a & b)
-        }
-        #[inline(always)]
-        fn full_add_inner(s: Self) -> (Self, Self) {
-            Self::full_add(s.sll1(), s, s.srl1())
-        }
-        fn next_state(n1: Self, n2: Self, n3: Self) -> Self {
-            Self::next_state_from_partials(
-                n2,
-                Self::full_add_inner(n1),
-                Self::full_add_inner(n2),
-                Self::full_add_inner(n3),
-            )
-        }
-        #[inline(never)]
-        fn next_state_from_partials(
-            s: Self,
-            p1: (Self, Self),
-            p2: (Self, Self),
-            p3: (Self, Self),
-        ) -> Self {
-            let (a, b) = Self::full_add(p1.0, p2.0, p3.0); // 1, 2
-            let (c, d) = Self::full_add(p1.1, p2.1, p3.1); // 2, 4
-
-            //let eq4 = !a & (!b & !c & d | b & c & !d);
-            let eq4 = !a & !(b ^ c) & ((b & c) ^ d);
-            
-
-            let eq3 = a & !d & (b ^ c);
-            eq3 | (eq4 & s)
-
-            //todo!()
-
-            //let (pa, pb) = Self::full_add(p1.0, p2.0, p3.0); // 1, 2
-            //let (pc, pd) = Self::full_add(p1.1, p2.1, p3.1); // 2, 4
-
-            //let a = pa; // 1
-            //let (b, t0) = Self::half_add(pb, pc); // 2, 4
-            //let (c, d) = Self::half_add(t0, pd); // 4, 8
-            //
-            //((!a) & (!b) & c & (!d)) | (a & b & (!c) & (!d) & s)
-
-            //// TODO: share full sum calc between row pairs (saves 1 operation/row on average)
-            //let (a, b) = Self::full_add(p1.0, p2.0, p3.0);
-            //let (c, d) = Self::full_add(p1.1, p2.1, p3.1);
-            //// [dependency barrier]
-            //let t0 = b ^ c;
-            //let t1 = b & c;
-            //let t2 = s & a;
-            //// [dependency barrier]
-            //let t3 = d ^ t1;
-            //let t4 = t2.andn(d);
-            //// [dependency barrier]
-            //{
-            //    let t5 = t3.andn(t0);
-            //    let t6 = t0 & t4;
-            //    // [dependency barrier]
-            //    t5 | t6
-            //}
-        }
     }
     impl<T> Cint for T
     where
@@ -210,32 +168,32 @@ mod int_lib {
 #[derive(Clone)]
 struct Foo(Vec<u8>);
 
-trait Int:
-    BitXor<Output = Self>
-    + BitAnd<Output = Self>
-    + Not<Output = Self>
-    + BitOr<Output = Self>
-    + Shr<Self, Output = Self>
-    + Shl<Self, Output = Self>
-    + From<u8>
-    + Clone
-{
-    fn c(&self) -> Self {
-        self.clone()
-    }
-}
+//trait Int:
+//    BitXor<Output = Self>
+//    + BitAnd<Output = Self>
+//    + Not<Output = Self>
+//    + BitOr<Output = Self>
+//    + Shr<Self, Output = Self>
+//    + Shl<Self, Output = Self>
+//    + From<u8>
+//    + Clone
+//{
+//    fn c(&self) -> Self {
+//        self.clone()
+//    }
+//}
 
-impl<T> Int for T where
-    T: BitXor<Output = T>
-        + BitAnd<Output = T>
-        + Not<Output = T>
-        + BitOr<Output = T>
-        + Shr<Self, Output = T>
-        + Shl<Self, Output = T>
-        + From<u8>
-        + Clone
-{
-}
+//impl<T> Int for T where
+//    T: BitXor<Output = T>
+//        + BitAnd<Output = T>
+//        + Not<Output = T>
+//        + BitOr<Output = T>
+//        + Shr<Self, Output = T>
+//        + Shl<Self, Output = T>
+//        + From<u8>
+//        + Clone
+//{
+//}
 
 #[derive(Debug, Clone)]
 struct BitLangVar(String);
@@ -376,24 +334,24 @@ fn nxt_state_line(n1: u64, n2: u64, n3: u64) -> u64 {
 }
 fn hadd<T>(a: T, b: T) -> (T, T)
 where
-    T: Int,
+    T: Cint,
 {
-    (a.c() ^ b.c(), a.c() & b.c())
+    (a ^ b, a & b)
 }
 fn fadd<T>(a: T, b: T, c: T) -> (T, T)
 where
-    T: Int,
+    T: Cint,
 {
     (
-        a.c() ^ b.c() ^ c.c(),
-        (a.c() & b.c()) ^ ((a.c() ^ b.c()) & c.c()),
+        a ^ b ^ c,
+        (a & b) ^ ((a ^ b) & c),
     )
 }
 fn sfadd<T>(a: T) -> (T, T)
 where
-    T: Int,
+    T: Cint,
 {
-    fadd(a.c() << 1.into(), a.c(), a.c() >> 1.into())
+    fadd(a.sll1(), a, a.srl1())
 }
 
 fn update_state(state: &[u64; 64], new_state: &mut [u64; 64]) {
@@ -481,7 +439,7 @@ mod test {
             let baseline = nxt_state_line_baseline(n1, n2, n3);
             assert_eq!(baseline, nxt_state_line_optim(n1, n2, n3));
             assert_eq!(baseline, nxt_state_line_nested(n1, n2, n3));
-            assert_eq!(baseline, Cint::next_state(n1, n2, n3));
+            assert_eq!(baseline, int_lib::next_state(n1, n2, n3));
         }
     }
     fn nxt_state_line_baseline(n1: u64, n2: u64, n3: u64) -> u64 {
