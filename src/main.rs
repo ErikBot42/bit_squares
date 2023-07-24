@@ -6,7 +6,7 @@ use prng::Prng;
 
 // gather: p0 + p015 + 4*p23 + p5 (lat 20)
 // load aligned: 1*p015+1*p23 (lat ptr: 5, index: 8)
-use int_lib::Cint;
+use int_lib::Int;
 mod int_lib {
     use std::arch::x86_64::*;
     use std::fmt::Debug;
@@ -65,7 +65,7 @@ mod int_lib {
             Self(unsafe { _mm256_xor_si256(self.0, _mm256_set1_epi32(-1)) })
         }
     }
-    impl Cint for M256w {
+    impl Int for M256w {
         /// 1 lat, 1 cycle
         /// p5
         #[inline(always)]
@@ -90,7 +90,7 @@ mod int_lib {
 
     // lat: 3 cycles
     #[inline(always)]
-    fn full_add<T: Cint>(a: T, b: T, c: T) -> (T, T) {
+    fn full_add<T: Int>(a: T, b: T, c: T) -> (T, T) {
         let a_xor_b = a ^ b;
         let t0 = a & b;
         // [dependency barrier]
@@ -100,19 +100,19 @@ mod int_lib {
         (t1, t2 | t0)
     }
     #[inline(always)]
-    fn full_add_inner<T: Cint>(s: T) -> (T, T) {
+    fn full_add_inner<T: Int>(s: T) -> (T, T) {
         full_add(s.sll1(), s, s.srl1())
     }
 
     #[inline(never)]
-    fn next_state_from_partials<T: Cint>(s: T, p1: (T, T), p2: (T, T), p3: (T, T)) -> T {
+    fn next_state_from_partials<T: Int>(s: T, p1: (T, T), p2: (T, T), p3: (T, T)) -> T {
         //// TODO: share full sum calc between row pairs (saves 1 operation/row on average)
         let (a, b) = full_add(p1.0, p2.0, p3.0); // 1, 2
         let (c, d) = full_add(p1.1, p2.1, p3.1); // 2, 4
         let bxc = b ^ c;
         a & bxc & !d | !a & !bxc & ((b & c) ^ d) & s
     }
-    pub fn next_state<T: Cint>(n1: T, n2: T, n3: T) -> T {
+    pub fn next_state<T: Int>(n1: T, n2: T, n3: T) -> T {
         next_state_from_partials(
             n2,
             full_add_inner(n1),
@@ -120,7 +120,7 @@ mod int_lib {
             full_add_inner(n3),
         )
     }
-    pub trait Cint:
+    pub trait Int:
         BitXor<Output = Self>
         + BitAnd<Output = Self>
         + Not<Output = Self>
@@ -140,7 +140,7 @@ mod int_lib {
         fn sll1(self) -> Self;
         fn srl1(self) -> Self;
     }
-    impl<T> Cint for T
+    impl<T> Int for T
     where
         T: BitXor<Output = T>
             + BitAnd<Output = T>
@@ -163,88 +163,60 @@ mod int_lib {
             self >> T::from(1)
         }
     }
-}
 
-#[derive(Clone)]
-struct Foo(Vec<u8>);
+    #[derive(Debug, Clone)]
+    struct BitLangVar(String);
 
-//trait Int:
-//    BitXor<Output = Self>
-//    + BitAnd<Output = Self>
-//    + Not<Output = Self>
-//    + BitOr<Output = Self>
-//    + Shr<Self, Output = Self>
-//    + Shl<Self, Output = Self>
-//    + From<u8>
-//    + Clone
-//{
-//    fn c(&self) -> Self {
-//        self.clone()
-//    }
-//}
+    impl BitOr for BitLangVar {
+        type Output = Self;
 
-//impl<T> Int for T where
-//    T: BitXor<Output = T>
-//        + BitAnd<Output = T>
-//        + Not<Output = T>
-//        + BitOr<Output = T>
-//        + Shr<Self, Output = T>
-//        + Shl<Self, Output = T>
-//        + From<u8>
-//        + Clone
-//{
-//}
+        fn bitor(self, rhs: Self) -> Self::Output {
+            BitLangVar(format!("(| {} {})", &self.0, &rhs.0))
+        }
+    }
+    impl BitXor for BitLangVar {
+        type Output = Self;
 
-#[derive(Debug, Clone)]
-struct BitLangVar(String);
+        fn bitxor(self, rhs: Self) -> Self::Output {
+            BitLangVar(format!("(^ {} {})", &self.0, &rhs.0))
+        }
+    }
+    impl BitAnd for BitLangVar {
+        type Output = Self;
 
-impl BitOr for BitLangVar {
-    type Output = Self;
+        fn bitand(self, rhs: Self) -> Self::Output {
+            BitLangVar(format!("(& {} {})", &self.0, &rhs.0))
+        }
+    }
+    impl Shr for BitLangVar {
+        type Output = Self;
 
-    fn bitor(self, rhs: Self) -> Self::Output {
-        BitLangVar(format!("(| {} {})", &self.0, &rhs.0))
+        fn shr(self, rhs: BitLangVar) -> Self::Output {
+            BitLangVar(format!("(> {} {})", &self.0, &rhs.0))
+        }
+    }
+    impl Shl for BitLangVar {
+        type Output = Self;
+
+        fn shl(self, rhs: BitLangVar) -> Self::Output {
+            BitLangVar(format!("(< {} {})", &self.0, &rhs.0))
+        }
+    }
+    impl Not for BitLangVar {
+        type Output = Self;
+
+        fn not(self) -> Self::Output {
+            BitLangVar(format!("(! {})", &self.0))
+        }
+    }
+    impl From<u8> for BitLangVar {
+        fn from(value: u8) -> Self {
+            BitLangVar(format!("{value}"))
+        }
     }
 }
-impl BitXor for BitLangVar {
-    type Output = Self;
 
-    fn bitxor(self, rhs: Self) -> Self::Output {
-        BitLangVar(format!("(^ {} {})", &self.0, &rhs.0))
-    }
-}
-impl BitAnd for BitLangVar {
-    type Output = Self;
 
-    fn bitand(self, rhs: Self) -> Self::Output {
-        BitLangVar(format!("(& {} {})", &self.0, &rhs.0))
-    }
-}
-impl Shr for BitLangVar {
-    type Output = Self;
-
-    fn shr(self, rhs: BitLangVar) -> Self::Output {
-        BitLangVar(format!("(> {} {})", &self.0, &rhs.0))
-    }
-}
-impl Shl for BitLangVar {
-    type Output = Self;
-
-    fn shl(self, rhs: BitLangVar) -> Self::Output {
-        BitLangVar(format!("(< {} {})", &self.0, &rhs.0))
-    }
-}
-impl Not for BitLangVar {
-    type Output = Self;
-
-    fn not(self) -> Self::Output {
-        BitLangVar(format!("(! {})", &self.0))
-    }
-}
-impl From<u8> for BitLangVar {
-    fn from(value: u8) -> Self {
-        BitLangVar(format!("{value}"))
-    }
-}
 
 #[cfg(test)]
 fn nxt_state_line_nested(n1: u64, n2: u64, n3: u64) -> u64 {
@@ -334,22 +306,19 @@ fn nxt_state_line(n1: u64, n2: u64, n3: u64) -> u64 {
 }
 fn hadd<T>(a: T, b: T) -> (T, T)
 where
-    T: Cint,
+    T: Int,
 {
     (a ^ b, a & b)
 }
 fn fadd<T>(a: T, b: T, c: T) -> (T, T)
 where
-    T: Cint,
+    T: Int,
 {
-    (
-        a ^ b ^ c,
-        (a & b) ^ ((a ^ b) & c),
-    )
+    (a ^ b ^ c, (a & b) ^ ((a ^ b) & c))
 }
 fn sfadd<T>(a: T) -> (T, T)
 where
-    T: Cint,
+    T: Int,
 {
     fadd(a.sll1(), a, a.srl1())
 }
@@ -365,29 +334,11 @@ fn update_state(state: &[u64; 64], new_state: &mut [u64; 64]) {
 }
 
 fn main() {
-    fn b(s: &str) -> BitLangVar {
-        BitLangVar(format!("{s}"))
+    #[inline(never)]
+    fn inner(a: u64, b: u64, c: u64) {
+        println!("...\n");
     }
-
-    //dbg!(fadd(
-    //    BitLangVar(format!("a")),
-    //    BitLangVar(format!("b")),
-    //    BitLangVar(format!("c")),
-    //));
-
-    //println!("Hello, world!▄▀ █");
-    //let mut prng = Prng(2348928348923895);
-    //let mut state = [(); 64].map(|_| prng.next());
-    //let mut state1 = [0; 64];
-    //loop {
-    //    display_bits(&state);
-    //    for _ in 0..1 {
-    //        state[0] = prng.next();
-    //        update_state(&state, &mut state1);
-    //        swap(&mut state, &mut state1);
-    //    }
-    //    std::thread::sleep(std::time::Duration::from_secs_f32(2.0 / 60.0));
-    //}
+    inner(23489, 234234, 234234);
 }
 
 fn display_bits<const LEN: usize>(arr: &[u64; LEN]) {
@@ -478,3 +429,22 @@ mod test {
             .fold(0, |acc, (i, b)| acc | ((b as u64) << i))
     }
 }
+
+
+// p5: shift/permute
+// p015: bitwise ops
+// p23: load packed
+// p237+p4: store
+//
+// p0 p1 p2 p3 p4 p5 p6 p7 | TP | lat  | instr   | desc
+//                A        | 1  | 1    | VPSLLDQ | shift, permute
+// A  A           A        | 3  | 1    | VPAND   | bitwise ops
+//       A  A              | 2  | 5/8  | VMOVDQA | load packed
+//       A  A  B        A  | 1  | 4/10 | VMOVDQA | store packed
+// A  A                    |    |      |         | compare     
+//
+// p0 int multiply
+// p2 load
+// p3 load
+// p5 shuffle unit
+// p6 predicted taken
