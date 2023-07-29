@@ -3,7 +3,9 @@ pub fn display_bits<const LEN: usize>(arr: &[u64; LEN]) {
     let mut buffer = String::new();
     let _ = writeln!(&mut buffer);
     let _ = writeln!(&mut buffer);
+    let _ = writeln!(&mut buffer, "|================================================================|");
     for i in 0..LEN / 2 {
+        let _ = write!(&mut buffer, "|");
         for j in 0..64 {
             let _ = write!(
                 &mut buffer,
@@ -16,8 +18,10 @@ pub fn display_bits<const LEN: usize>(arr: &[u64; LEN]) {
                 }
             );
         }
+        let _ = write!(&mut buffer, "|");
         let _ = writeln!(&mut buffer);
     }
+    let _ = writeln!(&mut buffer, "|================================================================|");
     println!("{}", buffer);
 }
 

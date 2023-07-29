@@ -59,14 +59,14 @@ impl Int for M256w {
     /// 1 lat, 1 cycle
     /// p5
     #[inline(always)]
-    fn sll1(self) -> Self {
+    fn sll(self) -> Self {
         Self(unsafe { _mm256_slli_si256::<1>(self.0) })
     }
 
     /// 1 lat, 1 cycle
     /// p5
     #[inline(always)]
-    fn srl1(self) -> Self {
+    fn srl(self) -> Self {
         Self(unsafe { _mm256_srli_si256::<1>(self.0) })
     }
 
@@ -75,6 +75,10 @@ impl Int for M256w {
     #[inline(always)]
     fn andn(self, other: Self) -> Self {
         Self(unsafe { _mm256_andnot_si256(other.0, self.0) })
+    }
+
+    fn zero() -> Self {
+        Self(unsafe { _mm256_setzero_si256() })
     }
 }
 
@@ -95,8 +99,9 @@ pub trait Int:
     fn andn(self, other: Self) -> Self {
         self & (!other)
     }
-    fn sll1(self) -> Self;
-    fn srl1(self) -> Self;
+    fn sll(self) -> Self;
+    fn srl(self) -> Self;
+    fn zero() -> Self;
 }
 impl<T> Int for T
 where
@@ -113,12 +118,16 @@ where
         + PartialEq
         + Eq,
 {
-    fn sll1(self) -> Self {
+    fn sll(self) -> Self {
         self << T::from(1)
     }
 
-    fn srl1(self) -> Self {
+    fn srl(self) -> Self {
         self >> T::from(1)
+    }
+
+    fn zero() -> Self {
+        0.into()
     }
 }
 
@@ -172,4 +181,3 @@ impl From<u8> for BitLangVar {
         BitLangVar(format!("{value}"))
     }
 }
-
