@@ -1,4 +1,7 @@
-use bit_squares::*;
+use bit_squares::display_bits;
+use bit_squares::Prng;
+use bit_squares::streaming_next_state;
+use std::iter::once;
 
 fn main() {
     fn update_board(board: &mut [u64; 64], next_board: &mut [u64; 64]) {
@@ -10,7 +13,9 @@ fn main() {
         //    next_board[i] = next_state_line_simple(n1, n2, n3);
         //}
 
-        for (i, nxt_state) in streaming_next_state(board.iter().copied()).enumerate() {
+        for (i, nxt_state) in
+            streaming_next_state(once(0).chain(board.iter().copied()).chain(once(0))).enumerate()
+        {
             next_board[i] = nxt_state;
         }
         *board = *next_board;
@@ -25,4 +30,3 @@ fn main() {
         std::thread::sleep(std::time::Duration::from_secs_f64(0.5));
     }
 }
-

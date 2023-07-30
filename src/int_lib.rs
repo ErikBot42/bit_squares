@@ -5,13 +5,11 @@ use std::ops::{BitAnd, BitOr, BitXor, Not, Shl, Shr};
 #[derive(Copy, Clone, Debug)]
 struct M256w(__m256i);
 impl Eq for M256w {
-    fn assert_receiver_is_total_eq(&self) {
-        todo!()
-    }
+    fn assert_receiver_is_total_eq(&self) {}
 }
 impl PartialEq for M256w {
     fn eq(&self, other: &Self) -> bool {
-        todo!()
+        -1_i32 == unsafe { _mm256_movemask_epi8(_mm256_cmpeq_epi64(self.0, other.0)) }
     }
 }
 
@@ -93,7 +91,7 @@ pub trait Int:
     + PartialEq
     + Eq
 {
-    const BITS: usize = std::mem::size_of::<Self>();
+    const BITS: usize = std::mem::size_of::<Self>() * 8;
     /// 1 lat, 1/3 cycle
     #[inline(always)]
     fn andn(self, other: Self) -> Self {
@@ -102,7 +100,11 @@ pub trait Int:
     fn sll(self) -> Self;
     fn srl(self) -> Self;
     fn zero() -> Self;
+    fn board<const BITS: usize>() -> [Self; BITS] {
+        [Self::zero(); BITS]
+    }
 }
+
 impl<T> Int for T
 where
     T: BitXor<Output = T>
